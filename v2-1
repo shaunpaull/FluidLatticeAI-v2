@@ -1,0 +1,178 @@
+#include <Eigen/Dense>
+#include <vector>
+#include <random>
+#include <iostream>
+#include <algorithm>
+
+// Function to generate multi-dimensional Fractal Brownian Motion
+Eigen::MatrixXd generateMultiDimFBM(int dim, int n, double H) {
+ std::random_device rd;
+ std::mt19937 gen(rd());
+ std::normal_distribution<> dis(0, 1);
+
+ Eigen::MatrixXd W(dim, n);
+ for (int i = 0; i < dim; ++i) {
+  W.row(i) = Eigen::VectorXd::Zero(n);
+  for (int j = 1; j < n; ++j) {
+   double dW = std::pow(j, H - 0.5) * dis(gen);
+   W(i, j) = W(i, j - 1) + dW;
+  }
+ }
+ return W;
+}
+
+namespace FluidLatticeAI {
+
+class Node {
+public:
+ Eigen::VectorXd flowVector; // Flow vector in arbitrary dimensions
+ double adaptability;
+ double randomnessFactor;
+ Eigen::VectorXd state;
+ Eigen::VectorXd memory;
+
+ Node(int stateDimensions, int flowVectorDimensions) {
+  initializeState(stateDimensions, flowVectorDimensions);
+ }
+
+ void process(Eigen::VectorXd inputSignal, std::vector<Node*> neighbors) {
+  if (inputSignal.size() != state.size()) {
+   throw std::invalid_argument("Input signal size must match state size");
+  }
+  Eigen::VectorXd environmentalSignal = calculateEnvironmentalSignal(neighbors);
+  adjustState(inputSignal);
+  introduceRandomness();
+  updateMemory();
+  adaptToEnvironment(environmentalSignal);
+ }
+
+ void activate() {
+  applyReLU();
+ }
+
+ void learn(Eigen::VectorXd errorSignal) {
+  // Simple gradient descent
+  Eigen::VectorXd gradient = -2 * errorSignal;
+  state += adaptability * gradient;
+ }
+
+private:
+ void initializeState(int stateDimensions, int flowVectorDimensions) {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<> dis(-1, 1);
+
+  flowVector = Eigen::VectorXd::Random(flowVectorDimensions).normalized();
+  adaptability = dis(gen);
+  randomnessFactor = dis(gen);
+  state = Eigen::VectorXd::Random(stateDimensions);
+  memory = Eigen::VectorXd::Zero(stateDimensions);
+ }
+
+ void adjustState(Eigen::VectorXd inputSignal) {
+  state += adaptability * (flowVector.dot(inputSignal.normalized()) * inputSignal - state);
+ }
+
+ void introduceRandomness() {
+  state += randomnessFactor * generateMultiDimFBM(state.size(), 1, 0.5);
+ }
+
+ void applyReLU() {
+  state = state.cwiseMax(0);
+ }
+
+ void updateMemory() {
+  memory = 0.9 * memory + 0.1 * state;
+ }
+
+ Eigen::VectorXd calculateEnvironmentalSignal(std::vector<Node*> neighbors) {
+  Eigen::VectorXd environmentalSignal = Eigen::VectorXd::Zero(state.size());
+  for (Node* neighbor : neighbors) {
+   environmentalSignal += neighbor->state;
+  }
+  return environmentalSignal / neighbors.size();
+ }
+
+ void adaptToEnvironment(Eigen::VectorXd environmentalSignal) {
+  environmentalSignal.normalize();
+  state += adaptability * (flowVector.dot(environmentalSignal) * environmentalSignal - state);
+ }
+};
+
+class Lattice {
+private:
+ std::vector<Node> nodes;
+ std::vector<int> dimensions;
+
+public:
+ Lattice(const std::vector<int>& dimensions, int stateDimensions, int flowVectorDimensions) 
+  : dimensions(dimensions) {
+  int totalNodes = std::accumulate(dimensions.begin(), dimensions.end(), 1, std::multiplies<int>());
+  nodes = std::vector<Node>(totalNodes, Node(stateDimensions, flowVectorDimensions));
+ }
+
+ int get1DIndex(const std::vector<int>& indices) {
+  int index = 0;
+  int multiplier = 1;
+  for (int i = 0; i < dimensions.size(); ++i) {
+   index += indices[i] * multiplier;
+   multiplier *= dimensions[i];
+  }
+  return index;
+ }
+
+ Node& getNode(const std::vector<int>& indices) {
+  return nodes[get1DIndex(indices)];
+ }
+
+ Eigen::VectorXd propagate(Eigen::VectorXd inputSignal, int radius) {
+  for (int i = 0; i < nodes.size(); ++i) {
+   std::vector<int> indices = getNDIndices(i);
+   std::vector<Node*> neighbors = getNeighbors(indices, radius);
+   nodes[i].process(inputSignal, neighbors);
+   nodes[i].activate();
+  }
+
+  return nodes.back().state;
+ }
+
+ Eigen::VectorXd calculateLayerAverage2() {
+  Eigen::VectorXd layerAverage = Eigen::VectorXd::Zero(nodes[0].state.size());
+  for (const Node& node : nodes) {
+   layerAverage += node.memory;
+  }
+  layerAverage /= nodes.size();
+  return layerAverage;
+ }
+
+ std::vector<int> getNDIndices(int index) {
+  std::vector<int> indices(dimensions.size());
+  for (int i = dimensions.size() - 1; i >= 0; --i) {
+   indices[i] = index % dimensions[i];
+   index /= dimensions[i];
+  }
+  return indices;
+ }
+
+ std::vector<Node*> getNeighbors(const std::vector<int>& indices, const std::vector<int>& radii) {
+  std::vector<Node*> neighbors;
+  getNeighborsRecursive(indices, radii, 0, indices, neighbors);
+  return neighbors;
+ }
+
+ void getNeighborsRecursive(const std::vector<int>& indices, const std::vector<int>& radii, int dimension, std::vector<int> currentIndices, std::vector<Node*>& neighbors) {
+  if (dimension == indices.size()) {
+   if (currentIndices != indices) {
+    neighbors.push_back(&getNode(currentIndices));
+   }
+  } else {
+   for (int i = -radii[dimension]; i <= radii[dimension]; ++i) {
+    int newIndex = (indices[dimension] + i + dimensions[dimension]) % dimensions[dimension];
+    currentIndices[dimension] = newIndex;
+    getNeighborsRecursive(indices, radii, dimension + 1, currentIndices, neighbors);
+   }
+  }
+ }
+};
+
+} // namespace FluidLatticeAI
